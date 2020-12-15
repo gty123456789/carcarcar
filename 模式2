@@ -1,0 +1,54 @@
+#include <Servo.h> 
+#include "SoftwareSerial.h"
+Servo myservo;  // 创建一个舵机对象
+               
+ //超声波测距引脚
+const int mTrigPin = 8; 
+const int mEchoPin = 7;
+int mDistance=0;
+//舵机引脚
+int pos = 0;  
+void setup() {
+   myservo.attach(9);  // attaches the servo on pin 9 to the servo object 
+Serial.begin(9600);     //初始化串口
+}
+
+void loop() {
+ 
+
+  for(pos = 0; pos < 180; pos += 1)  // goes from 0 degrees to 180 degrees 
+  { pinMode(mTrigPin, OUTPUT); 
+// 要检测引脚上输入的脉冲宽度，需要先设置为输入状态
+pinMode(mEchoPin, INPUT); 
+
+// 产生一个10us的高脉冲
+digitalWrite(mTrigPin, LOW);
+delayMicroseconds(2); 
+digitalWrite(mTrigPin, HIGH); 
+delayMicroseconds(10); 
+digitalWrite(mTrigPin, LOW); 
+//计算回传距离
+mDistance = pulseIn(mEchoPin, HIGH) / 58.0; 
+//Serial.println(mDistance);
+Serial.write(mDistance);                                 // in steps of 1 degree 
+    myservo.write(pos);              // 指定舵机旋转到的角度 
+    delay(5);                       // 等5ms来探测距离
+  } 
+  for(pos = 180; pos>=1; pos-=1)     //每次旋转1度然后到180度后回头
+  {  pinMode(mTrigPin, OUTPUT); 
+// 要检测引脚上输入的脉冲宽度，需要先设置为输入状态
+pinMode(mEchoPin, INPUT); 
+
+// 产生一个10us的高脉冲
+digitalWrite(mTrigPin, LOW);
+delayMicroseconds(2); 
+digitalWrite(mTrigPin, HIGH); 
+delayMicroseconds(10); 
+digitalWrite(mTrigPin, LOW); 
+
+mDistance = pulseIn(mEchoPin, HIGH) / 58.0; //计算回传距离
+//Serial.println(mDistance);
+Serial.write(mDistance);   //传入数据到processing                                
+                       
+  } 
+}
