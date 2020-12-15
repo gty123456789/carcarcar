@@ -1,0 +1,246 @@
+//引入ESP8266.h头文件，建议使用教程中修改后的文件
+#include "ESP8266.h"
+#include "SoftwareSerial.h"
+#include <Servo.h>
+#include "dht11.h"
+//配置ESP8266WIFI设置
+#define SSID "hejiancheng"    //填写2.4GHz的WIFI名称，不要使用校园网
+#define PASSWORD "13576468030"//填写自己的WIFI密码
+#define HOST_NAME "api.heclouds.com"  //API主机名称，连接到OneNET平台，无需修改
+#define DEVICE_ID "656381370"       //填写自己的OneNet设备ID
+#define HOST_PORT (80)                //API端口，连接到OneNET平台，无需修改
+String APIKey = "b0Oyx8sguBphggha43nnQT6fFfA="; //与设备绑定的APIKey
+#define INTERVAL_SENSOR 5000 //定义传感器采样及发送时间间隔
+
+//创建dht11示例
+
+dht11 DHT11;
+
+//定义DHT11接入Arduino的管脚
+#define DHT11PIN 4
+#define INTERVAL_SENSOR 500 //定义传感器采样及发送时间间隔
+int mDistance = 0;
+//超声波测距引脚
+const int mTrigPin = 8; 
+const int mEchoPin = 7;
+//定义小车引脚
+int Left_motor_back=5;     //左电机后退(IN1)
+int Left_motor_go=6;     //左电机前进(IN2)
+   
+int Right_motor_go=12;    // 右电机前进(IN3)
+int Right_motor_back=13;    // 右电机后退(IN4)
+//定义传感器引脚
+const int SensorRight_2 = 9;    //右红外传感器(P3.5 OUT4)
+const int SensorLeft_2 = 10;     //左红外传感器(P3.4 OUT3)
+int SL;    //左循迹红外传感器状态
+int SR;    //右循迹红外传感器状态
+int SL_2;    //左红外传感器状态
+int SR_2;    //右红外传感器状态 
+//定义ESP8266所连接的软串口
+/*********************
+ * 该实验需要使用软串口
+ * Arduino上的软串口RX定义为D3,
+ * 接ESP8266上的TX口,
+ * Arduino上的软串口TX定义为D2,
+ * 接ESP8266上的RX口.
+ * D3和D2可以自定义,
+ * 但接ESP8266时必须恰好相反
+ *********************/
+SoftwareSerial mySerial(3, 2);
+ESP8266 wifi(mySerial);
+
+void setup()
+{
+  mySerial.begin(115200); //初始化软串口
+  Serial.begin(9600);     //初始化串口
+  Serial.print("setup begin\r\n");
+//以下为自动避障小车代码
+ pinMode(Left_motor_go,OUTPUT); // PIN  5(PWM)
+ pinMode(Left_motor_back,OUTPUT); // PIN 6 (PWM)
+ pinMode(Right_motor_go,OUTPUT);// PIN 9 (PWM)
+ pinMode(Right_motor_back,OUTPUT);// PIN 10 (PWM)
+ pinMode(SensorRight_2, INPUT); //定义右红外传感器为输入
+ pinMode(SensorLeft_2, INPUT); //定义左红外传感器为输入
+                       //设置串口波特率为9600
+  //以下信息为DHT11库文件版本信息
+  Serial.println("DHT11 TEST PROGRAM ");
+  Serial.print("LIBRARY VERSION: ");
+  Serial.println(DHT11LIB_VERSION);
+  Serial.println();
+
+  //以下为ESP8266初始化的代码
+  Serial.print("FW Version: ");
+  Serial.println(wifi.getVersion().c_str());
+
+  if (wifi.setOprToStation()) {
+    Serial.print("to station ok\r\n");
+  } else {
+    Serial.print("to station err\r\n");
+  }
+
+  //ESP8266接入WIFI
+  if (wifi.joinAP(SSID, PASSWORD)) {
+    Serial.print("Join AP success\r\n");
+    Serial.print("IP: ");
+    Serial.println(wifi.getLocalIP().c_str());
+  } else {
+    Serial.print("Join AP failure\r\n");
+  }
+
+  Serial.println("");
+  mySerial.println("AT+UART_CUR=9600,8,1,0,0");
+  mySerial.begin(9600);
+  Serial.println("setup end\r\n");
+}
+//定义小车运动函数
+void run()     // 前进
+{
+ analogWrite(Right_motor_go,200);//右电机前进，PWM比例0~255调速，左右轮差异略增减
+ analogWrite(Right_motor_back,0);
+ analogWrite(Left_motor_go,200);// 左电机前进，PWM比例0~255调速，左右轮差异略增减
+ analogWrite(Left_motor_back,0);
+}
+
+void brake()         //刹车，停车
+{
+ digitalWrite(Right_motor_go,LOW);
+ digitalWrite(Right_motor_back,LOW);
+ digitalWrite(Left_motor_go,LOW);
+ digitalWrite(Left_motor_back,LOW);
+}
+
+void left()         //左转(左轮不动，右轮前进)
+{
+ analogWrite(Right_motor_go,200); //右电机前进，PWM比例0~255调速
+ analogWrite(Right_motor_back,0);
+ digitalWrite(Left_motor_go,LOW);   //左轮不动
+ digitalWrite(Left_motor_back,LOW);
+}
+void right()        //右转(右轮不动，左轮前进)
+{
+ digitalWrite(Right_motor_go,LOW);   //右电机不动
+ digitalWrite(Right_motor_back,LOW);
+
+ analogWrite(Left_motor_go,200);
+ analogWrite(Left_motor_back,0);//左电机前进，PWM比例0~255调速
+ }
+void back()          //后退
+{
+ analogWrite(Right_motor_go,0);
+ analogWrite(Right_motor_back,150);//右轮后退，PWM比例0~255调速
+
+ analogWrite(Left_motor_go,0);
+ analogWrite(Left_motor_back,150);//左轮后退，PWM比例0~255调速
+}
+
+unsigned long net_time1 = millis(); //数据上传服务器时间
+void loop(){;pinMode(mTrigPin, OUTPUT); 
+// 要检测引脚上输入的脉冲宽度，需要先设置为输入状态
+pinMode(mEchoPin, INPUT); 
+//记录实验数据组别
+  static int count = 1;
+  Serial.println(count++);
+
+  //获取DHT11传感器数据
+  int chk = DHT11.read(DHT11PIN);
+
+  //DHT11传感器数据校验状态
+  Serial.print("Read sensor: ");
+  switch (chk)
+  {
+    case DHTLIB_OK: 
+                Serial.println("OK"); 
+                break;
+    case DHTLIB_ERROR_CHECKSUM: 
+                Serial.println("Checksum error"); 
+                break;
+    case DHTLIB_ERROR_TIMEOUT: 
+                Serial.println("Time out error"); 
+                break;
+    default: 
+                Serial.println("Unknown error"); 
+                break;
+  }
+
+  //打印DHT11获得的湿度数据
+  Serial.print("Humidity (%): ");
+  Serial.println((float)DHT11.humidity, 2);
+
+  //打印DHT11获得的温度数据
+  Serial.print("Temperature (oC): ");
+  Serial.println((float)DHT11.temperature, 2);
+  
+  Serial.println("");
+
+// 产生一个10us的高脉冲
+digitalWrite(mTrigPin, LOW);
+delayMicroseconds(2); 
+digitalWrite(mTrigPin, HIGH); 
+delayMicroseconds(10); 
+digitalWrite(mTrigPin, LOW); 
+mDistance = pulseIn(mEchoPin, HIGH) / 58.0; 
+//Serial.println(mDistance);
+float sensor_tem = (float)DHT11.temperature;
+float sensor_hum = (float)DHT11.humidity;
+//Serial.write(mDistance);
+float distance=mDistance;
+    if (wifi.createTCP(HOST_NAME, HOST_PORT)) { //建立TCP连接，如果失败，不能发送该数据
+      Serial.print("create tcp ok\r\n");
+       char buff[15];//创建储存数据的数组
+       //定义上传的数据
+      String jsonToSend="{\"distance\":";
+       dtostrf(distance, 2, 2, buff);
+      jsonToSend += "\"" + String(buff) + "\"";
+      jsonToSend += ",\"Humidity\":";
+      dtostrf(sensor_hum, 1, 2, buff);
+      jsonToSend += "\"" + String(buff) + "\"";
+      jsonToSend +=",\"Temperature\":";
+      dtostrf(sensor_tem, 1, 2, buff);
+      jsonToSend += "\"" + String(buff) + "\"";
+       jsonToSend += "}";
+      //拼接POST请求字符串
+      String postString = "POST /devices/";
+      postString += DEVICE_ID;
+      postString += "/datapoints?type=3 HTTP/1.1";
+      postString += "\r\n";
+      postString += "api-key:";
+      postString += APIKey;
+      postString += "\r\n";
+      postString += "Host:api.heclouds.com\r\n";
+      postString += "Connection:close\r\n";
+      postString += "Content-Length:";
+      postString += jsonToSend.length();
+      postString += "\r\n";
+      postString += "\r\n";
+      postString += jsonToSend;
+      postString += "\r\n";
+      postString += "\r\n";
+      postString += "\r\n";
+
+      const char *postArray = postString.c_str(); //将str转化为char数组
+
+      Serial.println(postArray);
+      wifi.send((const uint8_t *)postArray, strlen(postArray)); //send发送命令，参数必须是这两种格式，尤其是(const uint8_t*)
+      Serial.println("send success");
+      if (wifi.releaseTCP()) { //释放TCP连接
+        Serial.print("release tcp ok\r\n");
+      } else {
+        Serial.print("release tcp err\r\n");
+      }
+      postArray = NULL; //清空数组，等待下次传输数据
+    } else {
+      Serial.print("create tcp err\r\n");
+    }
+    net_time1 = millis();
+    //红外避障模块数据读取
+     SR_2 = digitalRead(SensorRight_2);
+   SL_2 = digitalRead(SensorLeft_2);
+   //小车运动代码
+   if (SL_2 == HIGH&&SR_2==HIGH)
+     run();   //调用前进函数
+   else if (SL_2 == HIGH & SR_2 == LOW)// 右边探测到有障碍物，有信号返回，向左转
+       left();
+   else if (SR_2 == HIGH & SL_2 == LOW) //左边探测到有障碍物，有信号返回，向右转  
+     right();
+   else // 都是有障碍物, 后退
+     back();}
